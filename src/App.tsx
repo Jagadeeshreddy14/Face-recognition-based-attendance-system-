@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import * as faceapi from 'face-api.js';
 import { loadModels, createFaceMatcher } from './services/faceRecognition';
-import { LogIn, UserCheck, Users, BarChart3, Settings, LogOut, Camera, ShieldCheck, FileSpreadsheet, FileText, User, Menu, X, Activity, CheckCircle2, AlertCircle, Clock, UserPlus, Check, Ban } from 'lucide-react';
+import { LogIn, UserCheck, Users, BarChart3, Settings, LogOut, Camera, ShieldCheck, FileSpreadsheet, FileText, User, Menu, X, Activity, CheckCircle2, AlertCircle, Clock, UserPlus, Check, Ban, Search, ArrowLeft, Upload, FileUp } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
@@ -58,7 +58,8 @@ const Card = ({ children, className = "" }: any) => (
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(localStorage.getItem('token'));
-  const [view, setView] = useState<'login' | 'dashboard' | 'attendance' | 'students' | 'reports' | 'profile' | 'live' | 'register' | 'approvals' | 'settings'>('login');
+  const [view, setView] = useState<'login' | 'dashboard' | 'attendance' | 'students' | 'reports' | 'profile' | 'live' | 'register' | 'approvals' | 'settings' | 'student-details'>('login');
+  const [selectedStudentId, setSelectedStudentId] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -202,11 +203,12 @@ export default function App() {
             {view === 'dashboard' && <Dashboard user={user!} token={token!} />}
             {view === 'live' && <LiveAttendanceView token={token!} />}
             {view === 'attendance' && <AttendanceView token={token!} />}
-            {view === 'students' && <StudentsView token={token!} />}
+            {view === 'students' && <StudentsView token={token!} onViewDetails={(id) => { setSelectedStudentId(id); setView('student-details'); }} />}
             {view === 'approvals' && <ApprovalsView token={token!} />}
             {view === 'reports' && <ReportsView token={token!} />}
             {view === 'settings' && <SettingsView token={token!} />}
             {view === 'profile' && <ProfileView user={user!} token={token!} />}
+            {view === 'student-details' && <StudentDetailsView studentId={selectedStudentId!} token={token!} onBack={() => setView('students')} />}
           </motion.div>
         </AnimatePresence>
       </main>
@@ -299,7 +301,9 @@ function RegisterPage({ onBack }: { onBack: () => void }) {
   const [captureProgress, setCaptureProgress] = useState(0);
   const [capturedDescriptor, setCapturedDescriptor] = useState<any>(null);
   const [success, setSuccess] = useState(false);
+  const [isProcessingImage, setIsProcessingImage] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
 
   const startCamera = async () => {
     try {
@@ -309,8 +313,35 @@ function RegisterPage({ onBack }: { onBack: () => void }) {
       if (videoRef.current) videoRef.current.srcObject = stream;
       await loadModels();
     } catch (err) {
-      alert("Could not access camera");
+      alert("Could not access camera. You can use the image upload option instead.");
       setIsCapturing(false);
+    }
+  };
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsProcessingImage(true);
+    try {
+      await loadModels();
+      const img = await faceapi.bufferToImage(file);
+      const detection = await faceapi.detectSingleFace(img, new faceapi.TinyFaceDetectorOptions())
+        .withFaceLandmarks()
+        .withFaceDescriptor();
+
+      if (detection) {
+        setCapturedDescriptor(Array.from(detection.descriptor));
+        alert("Face data extracted from image successfully!");
+      } else {
+        alert("No face detected in the uploaded image. Please try another photo.");
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Failed to process image. Please ensure it's a valid image file.");
+    } finally {
+      setIsProcessingImage(false);
+      if (imageInputRef.current) imageInputRef.current.value = '';
     }
   };
 
@@ -396,13 +427,41 @@ function RegisterPage({ onBack }: { onBack: () => void }) {
                           <CheckCircle2 size={18} /> <span>Face Data Captured</span>
                         </div>
                       ) : (
-                        <button type="button" onClick={startCamera} className="text-zinc-400 hover:text-white transition-colors text-sm font-medium">Click to Open Camera</button>
+                        <div className="flex flex-col space-y-3">
+                          <button type="button" onClick={startCamera} className="text-zinc-400 hover:text-white transition-colors text-sm font-medium flex items-center justify-center space-x-2">
+                            <Camera size={16} />
+                            <span>Open Camera</span>
+                          </button>
+                          <div className="flex items-center justify-center space-x-2">
+                            <div className="h-px bg-white/10 flex-1"></div>
+                            <span className="text-[10px] text-zinc-600 uppercase font-bold">OR</span>
+                            <div className="h-px bg-white/10 flex-1"></div>
+                          </div>
+                          <input 
+                            type="file" 
+                            ref={imageInputRef} 
+                            onChange={handleImageUpload} 
+                            accept="image/*" 
+                            className="hidden" 
+                          />
+                          <button 
+                            type="button" 
+                            onClick={() => imageInputRef.current?.click()} 
+                            disabled={isProcessingImage}
+                            className="text-zinc-400 hover:text-white transition-colors text-sm font-medium flex items-center justify-center space-x-2"
+                          >
+                            <Upload size={16} />
+                            <span>{isProcessingImage ? 'Processing...' : 'Upload Photo'}</span>
+                          </button>
+                        </div>
                       )}
                     </div>
                   )}
                 </div>
 
-                <Button type="submit" disabled={!capturedDescriptor} className="w-full py-4 !bg-white !text-black font-bold rounded-xl mt-4">Submit Registration</Button>
+                <Button type="submit" disabled={!capturedDescriptor || isProcessingImage} className="w-full py-4 !bg-white !text-black font-bold rounded-xl mt-4">
+                  {isProcessingImage ? 'Processing Image...' : 'Submit Registration'}
+                </Button>
                 <button type="button" onClick={onBack} className="w-full text-zinc-500 text-sm hover:text-zinc-300">Back to Login</button>
               </form>
             </>
@@ -832,9 +891,12 @@ function AttendanceView({ token }: { token: string }) {
   );
 }
 
-function StudentsView({ token }: { token: string }) {
+function StudentsView({ token, onViewDetails }: { token: string, onViewDetails: (id: number) => void }) {
   const [students, setStudents] = useState<any[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
   const [showAdd, setShowAdd] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isCapturing, setIsCapturing] = useState(false);
   const [captureProgress, setCaptureProgress] = useState(0);
@@ -850,6 +912,51 @@ function StudentsView({ token }: { token: string }) {
   };
 
   useEffect(() => { fetchStudents(); }, [token]);
+
+  const handleBulkImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsImporting(true);
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      try {
+        const bstr = evt.target?.result;
+        const wb = XLSX.read(bstr, { type: 'binary' });
+        const wsname = wb.SheetNames[0];
+        const ws = wb.Sheets[wsname];
+        const data = XLSX.utils.sheet_to_json(ws);
+
+        // Map data to expected format
+        const studentsToImport = data.map((row: any) => ({
+          name: row.Name || row.name,
+          roll_number: String(row['Roll Number'] || row.roll_number || row.roll),
+          department: row.Department || row.department || 'General'
+        }));
+
+        const res = await fetch('/api/students/bulk', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ students: studentsToImport })
+        });
+
+        if (res.ok) {
+          alert(`Successfully imported ${studentsToImport.length} students`);
+          fetchStudents();
+        } else {
+          const err = await res.json();
+          alert("Import failed: " + err.error);
+        }
+      } catch (err) {
+        console.error(err);
+        alert("Failed to parse file");
+      } finally {
+        setIsImporting(false);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+      }
+    };
+    reader.readAsBinaryString(file);
+  };
 
   const startCamera = async () => {
     try {
@@ -937,6 +1044,11 @@ function StudentsView({ token }: { token: string }) {
     fetchStudents();
   };
 
+  const filteredStudents = students.filter(s => 
+    s.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+    s.roll_number.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
   return (
     <div className="space-y-8">
       <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -944,7 +1056,35 @@ function StudentsView({ token }: { token: string }) {
           <h2 className="text-3xl md:text-4xl font-bold tracking-tight">Students</h2>
           <p className="text-zinc-500 mt-1">Manage student directory and face profiles.</p>
         </div>
-        <Button onClick={() => setShowAdd(true)} className="!rounded-xl px-6 py-3 w-full md:w-auto">Add New Student</Button>
+        <div className="flex flex-col md:flex-row gap-4 w-full md:w-auto">
+          <div className="relative flex-1 md:w-64">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={18} />
+            <input 
+              type="text" 
+              placeholder="Search by name or roll no..." 
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-4 py-3 bg-white border border-zinc-200 rounded-xl focus:ring-2 focus:ring-black outline-none transition-all"
+            />
+          </div>
+          <input 
+            type="file" 
+            ref={fileInputRef} 
+            onChange={handleBulkImport} 
+            accept=".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel" 
+            className="hidden" 
+          />
+          <Button 
+            onClick={() => fileInputRef.current?.click()} 
+            variant="secondary" 
+            disabled={isImporting}
+            className="!rounded-xl px-6 py-3 flex items-center space-x-2"
+          >
+            <FileUp size={18} />
+            <span>{isImporting ? 'Importing...' : 'Bulk Import'}</span>
+          </Button>
+          <Button onClick={() => setShowAdd(true)} className="!rounded-xl px-6 py-3">Add New Student</Button>
+        </div>
       </header>
 
       <Card>
@@ -960,7 +1100,7 @@ function StudentsView({ token }: { token: string }) {
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-50">
-              {students.map((student) => {
+              {filteredStudents.map((student) => {
                 const isFaceRegistered = student.face_descriptor && JSON.parse(student.face_descriptor).some((v: number) => v !== 0);
                 return (
                   <tr key={student.id}>
@@ -972,12 +1112,18 @@ function StudentsView({ token }: { token: string }) {
                         {isFaceRegistered ? 'Registered' : 'Not Registered'}
                       </span>
                     </td>
-                    <td className="py-4 text-right">
+                    <td className="py-4 text-right space-x-3">
+                      <button onClick={() => onViewDetails(student.id)} className="text-black hover:underline font-bold text-sm">View Details</button>
                       <button onClick={() => setDeleteConfirmId(student.id)} className="text-red-500 hover:text-red-700 font-medium text-sm">Delete</button>
                     </td>
                   </tr>
                 );
               })}
+              {filteredStudents.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="py-10 text-center text-zinc-400 italic">No students found matching your search.</td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -1307,6 +1453,134 @@ function ReportsView({ token }: { token: string }) {
               {report.length === 0 && (
                 <tr>
                   <td colSpan={5} className="py-10 text-center text-zinc-400 italic">No attendance records found.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+function StudentDetailsView({ studentId, token, onBack }: { studentId: number, token: string, onBack: () => void }) {
+  const [student, setStudent] = useState<any>(null);
+  const [attendance, setAttendance] = useState<any[]>([]);
+  const [totalClasses, setTotalClasses] = useState(0);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      const studentRes = await fetch(`/api/students/${studentId}`, { headers: { 'Authorization': `Bearer ${token}` } });
+      setStudent(await studentRes.json());
+      
+      const attendanceRes = await fetch(`/api/attendance/student/${studentId}`, { headers: { 'Authorization': `Bearer ${token}` } });
+      setAttendance(await attendanceRes.json());
+
+      const statsRes = await fetch('/api/analytics/summary', { headers: { 'Authorization': `Bearer ${token}` } });
+      const stats = await statsRes.json();
+      setTotalClasses(stats.totalClasses);
+    };
+    fetchData();
+  }, [studentId, token]);
+
+  if (!student) return <div className="flex items-center justify-center h-64 text-zinc-400">Loading student details...</div>;
+
+  const isFaceRegistered = student.face_descriptor && JSON.parse(student.face_descriptor).some((v: number) => v !== 0);
+  const attendancePercentage = totalClasses > 0 ? Math.round((attendance.length / totalClasses) * 100) : 0;
+
+  return (
+    <div className="space-y-8">
+      <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div className="flex items-center space-x-4">
+          <button onClick={onBack} className="p-2 hover:bg-zinc-100 rounded-full transition-colors">
+            <ArrowLeft size={24} />
+          </button>
+          <div>
+            <h2 className="text-3xl md:text-4xl font-bold tracking-tight">{student.name}</h2>
+            <p className="text-zinc-500 mt-1">Student Profile & Attendance History</p>
+          </div>
+        </div>
+      </header>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <Card className="md:col-span-1 space-y-6">
+          <h3 className="text-lg font-bold">Personal Information</h3>
+          <div className="space-y-4">
+            <div className="flex justify-between border-b border-zinc-50 pb-2">
+              <span className="text-zinc-400 text-sm">Roll Number</span>
+              <span className="font-mono font-bold">{student.roll_number}</span>
+            </div>
+            <div className="flex justify-between border-b border-zinc-50 pb-2">
+              <span className="text-zinc-400 text-sm">Department</span>
+              <span className="font-bold">{student.department}</span>
+            </div>
+            <div className="flex justify-between border-b border-zinc-50 pb-2">
+              <span className="text-zinc-400 text-sm">Status</span>
+              <span className="text-emerald-600 font-bold uppercase text-xs">Active</span>
+            </div>
+            <div className="flex justify-between pt-2">
+              <span className="text-zinc-400 text-sm">Face Data</span>
+              <span className={`px-2 py-1 rounded-md text-xs font-bold uppercase ${isFaceRegistered ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'}`}>
+                {isFaceRegistered ? 'Registered' : 'Not Registered'}
+              </span>
+            </div>
+          </div>
+        </Card>
+
+        <Card className="md:col-span-1 flex flex-col items-center justify-center text-center space-y-4">
+          <div className="relative w-32 h-32">
+            <svg className="w-full h-full" viewBox="0 0 36 36">
+              <path className="text-zinc-100" strokeDasharray="100, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" strokeWidth="3" />
+              <path className="text-black" strokeDasharray={`${attendancePercentage}, 100`} d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+            </svg>
+            <div className="absolute inset-0 flex flex-col items-center justify-center">
+              <span className="text-2xl font-bold">{attendancePercentage}%</span>
+              <span className="text-[10px] text-zinc-400 uppercase font-bold">Attendance</span>
+            </div>
+          </div>
+          <div>
+            <p className="text-sm font-bold text-zinc-900">{attendance.length} / {totalClasses}</p>
+            <p className="text-xs text-zinc-400">Classes Attended</p>
+          </div>
+        </Card>
+
+        <Card className="md:col-span-1 flex flex-col justify-center space-y-4">
+          <div className="p-4 bg-zinc-50 rounded-xl">
+            <p className="text-xs text-zinc-400 uppercase font-bold tracking-widest mb-1">Last Seen</p>
+            <p className="font-bold">{attendance.length > 0 ? attendance[0].date : 'Never'}</p>
+            <p className="text-xs text-zinc-500">{attendance.length > 0 ? attendance[0].time : 'No records'}</p>
+          </div>
+          <div className="p-4 bg-zinc-50 rounded-xl">
+            <p className="text-xs text-zinc-400 uppercase font-bold tracking-widest mb-1">Registration Date</p>
+            <p className="font-bold">{new Date(student.created_at).toLocaleDateString()}</p>
+          </div>
+        </Card>
+      </div>
+
+      <Card>
+        <h3 className="text-xl font-bold mb-6">Attendance History</h3>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left">
+            <thead>
+              <tr className="border-b border-zinc-100">
+                <th className="pb-4 font-semibold text-zinc-400 uppercase text-[10px] tracking-widest">Date</th>
+                <th className="pb-4 font-semibold text-zinc-400 uppercase text-[10px] tracking-widest">Time</th>
+                <th className="pb-4 font-semibold text-zinc-400 uppercase text-[10px] tracking-widest">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-50">
+              {attendance.map((record) => (
+                <tr key={record.id}>
+                  <td className="py-4 font-medium">{record.date}</td>
+                  <td className="py-4 text-zinc-500">{record.time}</td>
+                  <td className="py-4">
+                    <span className="px-2 py-1 bg-emerald-50 text-emerald-600 rounded-md text-[10px] font-bold uppercase">Present</span>
+                  </td>
+                </tr>
+              ))}
+              {attendance.length === 0 && (
+                <tr>
+                  <td colSpan={3} className="py-10 text-center text-zinc-400 italic">No attendance records found for this student.</td>
                 </tr>
               )}
             </tbody>

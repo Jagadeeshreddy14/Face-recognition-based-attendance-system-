@@ -225,6 +225,28 @@ async function startServer() {
     }
   });
 
+  app.post("/api/students/bulk", authenticateToken, async (req: any, res) => {
+    if (req.user.role !== 'admin') return res.sendStatus(403);
+    const { students } = req.body; // Array of { name, roll_number, department, face_descriptor }
+    try {
+      const insertStudent = db.prepare("INSERT INTO students (name, roll_number, department, face_descriptor, status) VALUES (?, ?, ?, ?, ?)");
+      const insertUser = db.prepare("INSERT OR IGNORE INTO users (username, password, role, student_id) VALUES (?, ?, ?, ?)");
+      
+      const transaction = db.transaction((students) => {
+        for (const s of students) {
+          const result = insertStudent.run(s.name, s.roll_number, s.department, JSON.stringify(s.face_descriptor || new Array(128).fill(0)), 'approved');
+          const hashedPassword = bcrypt.hashSync(s.roll_number, 10);
+          insertUser.run(s.roll_number, hashedPassword, "student", result.lastInsertRowid);
+        }
+      });
+      transaction(students);
+
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
   app.delete("/api/students/:id", authenticateToken, async (req: any, res) => {
     const student = db.prepare("SELECT * FROM students WHERE id = ?").get(req.params.id) as any;
     if (student) {
