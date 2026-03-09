@@ -1,0 +1,7 @@
+{
+  "name": "FaceAuth Attendance System",
+  "description": "A comprehensive face recognition based attendance management system for colleges, featuring real-time detection, admin dashboards, and detailed reporting.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
