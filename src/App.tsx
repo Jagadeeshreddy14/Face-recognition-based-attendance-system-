@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import * as faceapi from 'face-api.js';
 import { loadModels, createFaceMatcher } from './services/faceRecognition';
-import { LogIn, UserCheck, Users, BarChart3, Settings, LogOut, Camera, ShieldCheck, FileSpreadsheet, FileText, User } from 'lucide-react';
+import { LogIn, UserCheck, Users, BarChart3, Settings, LogOut, Camera, ShieldCheck, FileSpreadsheet, FileText, User, Menu, X, Activity, CheckCircle2, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
@@ -58,8 +58,9 @@ const Card = ({ children, className = "" }: any) => (
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(localStorage.getItem('token'));
-  const [view, setView] = useState<'login' | 'dashboard' | 'attendance' | 'students' | 'reports' | 'profile'>('login');
+  const [view, setView] = useState<'login' | 'dashboard' | 'attendance' | 'students' | 'reports' | 'profile' | 'live'>('login');
   const [loading, setLoading] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
     if (token) {
@@ -110,10 +111,56 @@ export default function App() {
 
   if (!user && view === 'login') return <LoginPage onLogin={handleLogin} loading={loading} />;
 
+  const Navigation = () => (
+    <nav className="flex-1 space-y-1">
+      <NavItem icon={<BarChart3 size={20} />} label="Dashboard" active={view === 'dashboard'} onClick={() => { setView('dashboard'); setSidebarOpen(false); }} />
+      <NavItem icon={<Activity size={20} />} label="Live Attendance" active={view === 'live'} onClick={() => { setView('live'); setSidebarOpen(false); }} />
+      <NavItem icon={<Camera size={20} />} label="Mark Attendance" active={view === 'attendance'} onClick={() => { setView('attendance'); setSidebarOpen(false); }} />
+      {user?.role === 'admin' && (
+        <>
+          <NavItem icon={<Users size={20} />} label="Students" active={view === 'students'} onClick={() => { setView('students'); setSidebarOpen(false); }} />
+          <NavItem icon={<FileText size={20} />} label="Reports" active={view === 'reports'} onClick={() => { setView('reports'); setSidebarOpen(false); }} />
+        </>
+      )}
+      {user?.role === 'student' && (
+        <NavItem icon={<User size={20} />} label="My Profile" active={view === 'profile'} onClick={() => { setView('profile'); setSidebarOpen(false); }} />
+      )}
+    </nav>
+  );
+
   return (
-    <div className="min-h-screen bg-[#F9F9F9] flex">
+    <div className="min-h-screen bg-[#F9F9F9] flex flex-col md:flex-row">
+      {/* Mobile Header */}
+      <header className="md:hidden bg-white border-b border-zinc-200 p-4 flex items-center justify-between sticky top-0 z-50">
+        <div className="flex items-center space-x-3">
+          <div className="w-8 h-8 bg-black rounded-lg flex items-center justify-center text-white">
+            <ShieldCheck size={18} />
+          </div>
+          <h1 className="font-bold text-base">FaceAuth</h1>
+        </div>
+        <button onClick={() => setSidebarOpen(!sidebarOpen)} className="p-2 text-zinc-600">
+          {sidebarOpen ? <X size={24} /> : <Menu size={24} />}
+        </button>
+      </header>
+
+      {/* Sidebar Overlay */}
+      <AnimatePresence>
+        {sidebarOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setSidebarOpen(false)}
+            className="fixed inset-0 bg-black/20 backdrop-blur-sm z-40 md:hidden"
+          />
+        )}
+      </AnimatePresence>
+
       {/* Sidebar */}
-      <aside className="w-64 bg-white border-r border-zinc-200 flex flex-col p-6 space-y-8">
+      <aside className={`
+        fixed inset-y-0 left-0 w-64 bg-white border-r border-zinc-200 flex flex-col p-6 space-y-8 z-50 transition-transform duration-300 md:relative md:translate-x-0
+        ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
+      `}>
         <div className="flex items-center space-x-3 px-2">
           <div className="w-10 h-10 bg-black rounded-xl flex items-center justify-center text-white">
             <ShieldCheck size={24} />
@@ -124,19 +171,7 @@ export default function App() {
           </div>
         </div>
 
-        <nav className="flex-1 space-y-1">
-          <NavItem icon={<BarChart3 size={20} />} label="Dashboard" active={view === 'dashboard'} onClick={() => setView('dashboard')} />
-          <NavItem icon={<Camera size={20} />} label="Mark Attendance" active={view === 'attendance'} onClick={() => setView('attendance')} />
-          {user?.role === 'admin' && (
-            <>
-              <NavItem icon={<Users size={20} />} label="Students" active={view === 'students'} onClick={() => setView('students')} />
-              <NavItem icon={<FileText size={20} />} label="Reports" active={view === 'reports'} onClick={() => setView('reports')} />
-            </>
-          )}
-          {user?.role === 'student' && (
-            <NavItem icon={<User size={20} />} label="My Profile" active={view === 'profile'} onClick={() => setView('profile')} />
-          )}
-        </nav>
+        <Navigation />
 
         <div className="pt-6 border-t border-zinc-100">
           <div className="px-4 py-3 bg-zinc-50 rounded-xl mb-4">
@@ -152,7 +187,7 @@ export default function App() {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-y-auto p-8">
+      <main className="flex-1 overflow-y-auto p-4 md:p-8">
         <AnimatePresence mode="wait">
           <motion.div
             key={view}
@@ -162,6 +197,7 @@ export default function App() {
             transition={{ duration: 0.2 }}
           >
             {view === 'dashboard' && <Dashboard user={user!} token={token!} />}
+            {view === 'live' && <LiveAttendanceView token={token!} />}
             {view === 'attendance' && <AttendanceView token={token!} />}
             {view === 'students' && <StudentsView token={token!} />}
             {view === 'reports' && <ReportsView token={token!} />}
@@ -277,12 +313,12 @@ function Dashboard({ user, token }: { user: User; token: string }) {
   if (user.role === 'admin') {
     return (
       <div className="space-y-8">
-        <header className="flex justify-between items-end">
+        <header className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
           <div>
-            <h2 className="text-4xl font-bold tracking-tight">Overview</h2>
+            <h2 className="text-3xl md:text-4xl font-bold tracking-tight">Overview</h2>
             <p className="text-zinc-500 mt-1">Real-time system statistics and activity.</p>
           </div>
-          <div className="text-right">
+          <div className="text-left md:text-right">
             <p className="text-sm font-medium text-zinc-400">{new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
           </div>
         </header>
@@ -313,10 +349,10 @@ function Dashboard({ user, token }: { user: User; token: string }) {
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6 md:space-y-8">
       <header>
-        <h2 className="text-4xl font-bold tracking-tight">My Attendance</h2>
-        <p className="text-zinc-500 mt-1">Track your daily presence and statistics.</p>
+        <h2 className="text-3xl md:text-4xl font-bold tracking-tight">My Attendance</h2>
+        <p className="text-zinc-500 mt-1 text-sm md:text-base">Track your daily presence and statistics.</p>
       </header>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -354,6 +390,165 @@ function Dashboard({ user, token }: { user: User; token: string }) {
           </table>
         </div>
       </Card>
+    </div>
+  );
+}
+
+function LiveAttendanceView({ token }: { token: string }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [faceMatcher, setFaceMatcher] = useState<faceapi.FaceMatcher | null>(null);
+  const [detectedStudents, setDetectedStudents] = useState<any[]>([]);
+  const [isScanning, setIsScanning] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const cooldowns = useRef<Record<number, number>>({});
+
+  useEffect(() => {
+    const init = async () => {
+      try {
+        await loadModels();
+        const res = await fetch('/api/students', { headers: { 'Authorization': `Bearer ${token}` } });
+        const data = await res.json();
+        if (data.length > 0) {
+          setFaceMatcher(createFaceMatcher(data));
+        }
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 } });
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+        }
+        setLoading(false);
+        setIsScanning(true);
+      } catch (err) {
+        console.error(err);
+        setLoading(false);
+      }
+    };
+    init();
+    return () => {
+      const stream = videoRef.current?.srcObject as MediaStream;
+      stream?.getTracks().forEach(track => track.stop());
+    };
+  }, [token]);
+
+  useEffect(() => {
+    let interval: any;
+    if (isScanning && faceMatcher && videoRef.current) {
+      interval = setInterval(async () => {
+        if (!videoRef.current) return;
+        const detection = await faceapi.detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions())
+          .withFaceLandmarks()
+          .withFaceDescriptor();
+
+        if (detection) {
+          const match = faceMatcher.findBestMatch(detection.descriptor);
+          if (match.label !== 'unknown') {
+            const studentId = parseInt(match.label);
+            const now = Date.now();
+            
+            // 10 second cooldown for local feedback
+            if (!cooldowns.current[studentId] || now - cooldowns.current[studentId] > 10000) {
+              cooldowns.current[studentId] = now;
+              
+              try {
+                const res = await fetch('/api/attendance', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ student_id: studentId })
+                });
+                const result = await res.json();
+                
+                setDetectedStudents(prev => [
+                  { 
+                    id: Date.now(), 
+                    name: result.name || 'Unknown', 
+                    time: result.time || new Date().toLocaleTimeString(),
+                    status: res.ok ? 'success' : 'error',
+                    message: res.ok ? 'Attendance Marked' : result.error
+                  },
+                  ...prev.slice(0, 4)
+                ]);
+              } catch (e) {
+                console.error(e);
+              }
+            }
+          }
+        }
+      }, 1000); // Scan every second
+    }
+    return () => clearInterval(interval);
+  }, [isScanning, faceMatcher]);
+
+  return (
+    <div className="space-y-8">
+      <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+          <h2 className="text-3xl md:text-4xl font-bold tracking-tight">Live Attendance</h2>
+          <p className="text-zinc-500 mt-1">Real-time facial recognition and automated marking.</p>
+        </div>
+        <div className="flex items-center space-x-2 bg-emerald-50 text-emerald-600 px-4 py-2 rounded-full text-sm font-bold uppercase tracking-wider">
+          <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
+          <span>Live System Active</span>
+        </div>
+      </header>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="lg:col-span-2">
+          <Card className="!p-2 overflow-hidden !rounded-[2rem] bg-black aspect-video relative">
+            {loading ? (
+              <div className="absolute inset-0 flex items-center justify-center text-white space-x-3">
+                <div className="w-6 h-6 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+                <span>Initializing System...</span>
+              </div>
+            ) : (
+              <>
+                <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover scale-x-[-1] rounded-[1.8rem]" />
+                <div className="absolute inset-0 border-[30px] border-black/10 pointer-events-none">
+                  <div className="w-full h-full border border-white/20 rounded-2xl relative">
+                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 border-2 border-dashed border-white/30 rounded-full animate-[spin_10s_linear_infinite]" />
+                  </div>
+                </div>
+              </>
+            )}
+          </Card>
+        </div>
+
+        <div className="space-y-6">
+          <h3 className="text-lg font-bold flex items-center space-x-2">
+            <Activity size={20} className="text-emerald-500" />
+            <span>Recent Activity</span>
+          </h3>
+          <div className="space-y-4">
+            <AnimatePresence initial={false}>
+              {detectedStudents.map((log) => (
+                <motion.div
+                  key={log.id}
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  className={`p-4 rounded-2xl border flex items-start space-x-4 ${
+                    log.status === 'success' ? 'bg-emerald-50/50 border-emerald-100' : 'bg-red-50/50 border-red-100'
+                  }`}
+                >
+                  <div className={`p-2 rounded-xl ${log.status === 'success' ? 'bg-emerald-100 text-emerald-600' : 'bg-red-100 text-red-600'}`}>
+                    {log.status === 'success' ? <CheckCircle2 size={20} /> : <AlertCircle size={20} />}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-bold text-zinc-900 truncate">{log.name}</p>
+                    <p className={`text-xs font-medium ${log.status === 'success' ? 'text-emerald-600' : 'text-red-600'}`}>
+                      {log.message}
+                    </p>
+                    <p className="text-[10px] text-zinc-400 mt-1 uppercase font-bold tracking-tighter">{log.time}</p>
+                  </div>
+                </motion.div>
+              ))}
+              {detectedStudents.length === 0 && (
+                <div className="text-center py-12 bg-zinc-50 rounded-2xl border border-dashed border-zinc-200">
+                  <p className="text-zinc-400 text-sm italic">Waiting for detections...</p>
+                </div>
+              )}
+            </AnimatePresence>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -464,10 +659,10 @@ function AttendanceView({ token }: { token: string }) {
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8">
+    <div className="max-w-4xl mx-auto space-y-6 md:space-y-8">
       <header className="text-center">
-        <h2 className="text-4xl font-bold tracking-tight">Face Scanner</h2>
-        <p className="text-zinc-500 mt-2">Look directly into the camera to mark your attendance.</p>
+        <h2 className="text-3xl md:text-4xl font-bold tracking-tight">Face Scanner</h2>
+        <p className="text-zinc-500 mt-2 text-sm md:text-base">Look directly into the camera to mark your attendance.</p>
       </header>
 
       <div className="relative group">
@@ -521,6 +716,8 @@ function StudentsView({ token }: { token: string }) {
   const [captureProgress, setCaptureProgress] = useState(0);
   const [capturedDescriptors, setCapturedDescriptors] = useState<any[]>([]);
   const [capturedDescriptor, setCapturedDescriptor] = useState<any>(null);
+  const [success, setSuccess] = useState(false);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
 
   const fetchStudents = async () => {
     const res = await fetch('/api/students', { headers: { 'Authorization': `Bearer ${token}` } });
@@ -596,28 +793,33 @@ function StudentsView({ token }: { token: string }) {
     });
 
     if (res.ok) {
-      setShowAdd(false);
+      setSuccess(true);
       setCapturedDescriptor(null);
       fetchStudents();
+      setTimeout(() => {
+        setSuccess(false);
+        setShowAdd(false);
+      }, 2000);
     } else {
       alert("Failed to add student");
     }
   };
 
-  const deleteStudent = async (id: number) => {
-    if (!confirm("Are you sure? This will delete all attendance records for this student.")) return;
-    await fetch('/api/students/' + id, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
+  const confirmDelete = async () => {
+    if (deleteConfirmId === null) return;
+    await fetch('/api/students/' + deleteConfirmId, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
+    setDeleteConfirmId(null);
     fetchStudents();
   };
 
   return (
     <div className="space-y-8">
-      <header className="flex justify-between items-center">
+      <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <h2 className="text-4xl font-bold tracking-tight">Students</h2>
+          <h2 className="text-3xl md:text-4xl font-bold tracking-tight">Students</h2>
           <p className="text-zinc-500 mt-1">Manage student directory and face profiles.</p>
         </div>
-        <Button onClick={() => setShowAdd(true)} className="!rounded-xl px-6 py-3">Add New Student</Button>
+        <Button onClick={() => setShowAdd(true)} className="!rounded-xl px-6 py-3 w-full md:w-auto">Add New Student</Button>
       </header>
 
       <Card>
@@ -646,7 +848,7 @@ function StudentsView({ token }: { token: string }) {
                       </span>
                     </td>
                     <td className="py-4 text-right">
-                      <button onClick={() => deleteStudent(student.id)} className="text-red-500 hover:text-red-700 font-medium text-sm">Delete</button>
+                      <button onClick={() => setDeleteConfirmId(student.id)} className="text-red-500 hover:text-red-700 font-medium text-sm">Delete</button>
                     </td>
                   </tr>
                 );
@@ -659,53 +861,108 @@ function StudentsView({ token }: { token: string }) {
       {showAdd && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-6 z-50">
           <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="w-full max-w-2xl">
-            <Card className="p-8">
-              <h3 className="text-2xl font-bold mb-6">Register New Student</h3>
-              <form onSubmit={handleAddStudent} className="space-y-6">
-                <div className="grid grid-cols-2 gap-4">
-                  <Input label="Full Name" name="name" required />
-                  <Input label="Roll Number" name="roll_number" required />
+            <Card className="p-8 relative overflow-hidden">
+              {success ? (
+                <div className="py-12 text-center space-y-4">
+                  <div className="w-20 h-20 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-6">
+                    <CheckCircle2 size={40} />
+                  </div>
+                  <h3 className="text-2xl font-bold text-zinc-900">Student Registered!</h3>
+                  <p className="text-zinc-500">The student has been added successfully. They can now login using their Roll Number.</p>
                 </div>
-                <Input label="Department" name="department" required />
-                
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Face Registration</label>
-                  {isCapturing ? (
-                    <div className="relative aspect-video bg-black rounded-xl overflow-hidden">
-                      <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
-                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                        {captureProgress > 0 && (
-                          <div className="bg-black/60 px-4 py-2 rounded-full text-white text-sm font-bold">
-                            Capturing: {Math.round(captureProgress)}%
-                          </div>
-                        )}
-                      </div>
-                      <div className="absolute bottom-4 left-1/2 -translate-x-1/2">
-                        <Button onClick={captureFace} variant="success" disabled={captureProgress > 0 && captureProgress < 100}>
-                          {captureProgress > 0 ? "Processing..." : "Start Capture"}
-                        </Button>
-                      </div>
+              ) : (
+                <>
+                  <div className="flex justify-between items-center mb-6">
+                    <h3 className="text-2xl font-bold">Register New Student</h3>
+                    <button onClick={() => setShowAdd(false)} className="p-2 hover:bg-zinc-100 rounded-full transition-colors">
+                      <X size={20} />
+                    </button>
+                  </div>
+
+                  <div className="bg-blue-50 border border-blue-100 p-4 rounded-xl flex items-start space-x-3 mb-6">
+                    <AlertCircle size={20} className="text-blue-600 mt-0.5 flex-shrink-0" />
+                    <div className="text-xs text-blue-800 leading-relaxed">
+                      <p className="font-bold mb-1 uppercase tracking-wider">Login Information:</p>
+                      <p>Once registered, students can login using their <strong>Roll Number</strong> as both the username and default password.</p>
                     </div>
-                  ) : (
-                    <div className="border-2 border-dashed border-zinc-200 rounded-xl p-8 text-center">
-                      {capturedDescriptor ? (
-                        <div className="text-emerald-600 font-bold flex items-center justify-center space-x-2">
-                          <ShieldCheck />
-                          <span>Face Data Ready</span>
+                  </div>
+
+                  <form onSubmit={handleAddStudent} className="space-y-6">
+                    <div className="grid grid-cols-2 gap-4">
+                      <Input label="Full Name" name="name" required placeholder="e.g. John Doe" />
+                      <Input label="Roll Number" name="roll_number" required placeholder="e.g. STU001" />
+                    </div>
+                    <Input label="Department" name="department" required placeholder="e.g. Computer Science" />
+                    
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Face Registration</label>
+                      {isCapturing ? (
+                        <div className="relative aspect-video bg-black rounded-xl overflow-hidden">
+                          <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover scale-x-[-1]" />
+                          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                            {captureProgress > 0 && (
+                              <div className="bg-black/60 px-4 py-2 rounded-full text-white text-sm font-bold">
+                                Capturing: {Math.round(captureProgress)}%
+                              </div>
+                            )}
+                          </div>
+                          <div className="absolute bottom-4 left-1/2 -translate-x-1/2">
+                            <Button onClick={captureFace} variant="success" disabled={captureProgress > 0 && captureProgress < 100}>
+                              {captureProgress > 0 ? "Processing..." : "Start Capture"}
+                            </Button>
+                          </div>
                         </div>
                       ) : (
-                        <Button onClick={startCamera} variant="secondary">Open Camera to Register Face</Button>
+                        <div className="border-2 border-dashed border-zinc-200 rounded-xl p-8 text-center">
+                          {capturedDescriptor ? (
+                            <div className="text-emerald-600 font-bold flex items-center justify-center space-x-2">
+                              <ShieldCheck />
+                              <span>Face Data Ready</span>
+                            </div>
+                          ) : (
+                            <Button onClick={startCamera} variant="secondary">Open Camera to Register Face</Button>
+                          )}
+                        </div>
                       )}
                     </div>
-                  )}
-                </div>
 
-                <div className="flex justify-end space-x-3 pt-4 border-t border-zinc-100">
-                  <Button variant="secondary" onClick={() => setShowAdd(false)}>Cancel</Button>
-                  <Button type="submit" disabled={!capturedDescriptor}>Save Student Profile</Button>
-                </div>
-              </form>
+                    <div className="flex justify-end space-x-3 pt-4 border-t border-zinc-100">
+                      <Button variant="secondary" onClick={() => setShowAdd(false)}>Cancel</Button>
+                      <Button type="submit" disabled={!capturedDescriptor || success}>Complete Registration</Button>
+                    </div>
+                  </form>
+                </>
+              )}
             </Card>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Dialog */}
+      {deleteConfirmId !== null && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-[2rem] w-full max-w-md p-8 shadow-2xl space-y-6"
+          >
+            <div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto">
+              <AlertCircle size={32} />
+            </div>
+            <div className="text-center space-y-2">
+              <h3 className="text-2xl font-bold text-zinc-900">Delete Student?</h3>
+              <p className="text-zinc-500 leading-relaxed">
+                This action is permanent. Deleting this student will also remove all of their <strong>attendance records</strong> and <strong>face data</strong>.
+              </p>
+            </div>
+            <div className="flex flex-col space-y-3">
+              <Button onClick={confirmDelete} variant="danger" className="w-full py-4 !rounded-xl text-lg">
+                Yes, Delete Permanently
+              </Button>
+              <Button onClick={() => setDeleteConfirmId(null)} variant="secondary" className="w-full py-4 !rounded-xl">
+                Cancel
+              </Button>
+            </div>
           </motion.div>
         </div>
       )}
@@ -745,17 +1002,17 @@ function ReportsView({ token }: { token: string }) {
 
   return (
     <div className="space-y-8">
-      <header className="flex justify-between items-center">
+      <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <h2 className="text-4xl font-bold tracking-tight">Reports</h2>
+          <h2 className="text-3xl md:text-4xl font-bold tracking-tight">Reports</h2>
           <p className="text-zinc-500 mt-1">Generate and export attendance logs.</p>
         </div>
-        <div className="flex space-x-3">
-          <Button onClick={exportExcel} variant="secondary" className="flex items-center space-x-2">
+        <div className="flex space-x-3 w-full md:w-auto">
+          <Button onClick={exportExcel} variant="secondary" className="flex-1 md:flex-none flex items-center justify-center space-x-2">
             <FileSpreadsheet size={18} />
             <span>Excel</span>
           </Button>
-          <Button onClick={exportPDF} variant="secondary" className="flex items-center space-x-2">
+          <Button onClick={exportPDF} variant="secondary" className="flex-1 md:flex-none flex items-center justify-center space-x-2">
             <FileText size={18} />
             <span>PDF</span>
           </Button>
@@ -802,6 +1059,9 @@ function ReportsView({ token }: { token: string }) {
 function ProfileView({ user, token }: { user: User; token: string }) {
   const [student, setStudent] = useState<any>(null);
   const [attendance, setAttendance] = useState<any[]>([]);
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [passwordStatus, setPasswordStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [passwordError, setPasswordError] = useState('');
 
   useEffect(() => {
     const fetchData = async () => {
@@ -814,15 +1074,59 @@ function ProfileView({ user, token }: { user: User; token: string }) {
     fetchData();
   }, [user, token]);
 
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const formData = new FormData(e.target as HTMLFormElement);
+    const data = Object.fromEntries(formData);
+
+    if (data.newPassword !== data.confirmPassword) {
+      setPasswordError("New passwords do not match");
+      setPasswordStatus('error');
+      return;
+    }
+
+    setPasswordStatus('loading');
+    try {
+      const res = await fetch('/api/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({
+          currentPassword: data.currentPassword,
+          newPassword: data.newPassword
+        })
+      });
+      const result = await res.json();
+      if (res.ok) {
+        setPasswordStatus('success');
+        setTimeout(() => {
+          setShowPasswordModal(false);
+          setPasswordStatus('idle');
+        }, 2000);
+      } else {
+        setPasswordError(result.error);
+        setPasswordStatus('error');
+      }
+    } catch (err) {
+      setPasswordError("Failed to change password");
+      setPasswordStatus('error');
+    }
+  };
+
   if (!student) return <div className="flex items-center justify-center h-64 text-zinc-400">Loading profile...</div>;
 
   const isFaceRegistered = student.face_descriptor && JSON.parse(student.face_descriptor).some((v: number) => v !== 0);
 
   return (
-    <div className="space-y-8">
-      <header>
-        <h2 className="text-4xl font-bold tracking-tight">My Profile</h2>
-        <p className="text-zinc-500 mt-1">Detailed student information and attendance history.</p>
+    <div className="space-y-6 md:space-y-8">
+      <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+          <h2 className="text-3xl md:text-4xl font-bold tracking-tight">My Profile</h2>
+          <p className="text-zinc-500 mt-1 text-sm md:text-base">Detailed student information and attendance history.</p>
+        </div>
+        <Button onClick={() => setShowPasswordModal(true)} variant="secondary" className="flex items-center space-x-2 !rounded-xl">
+          <Settings size={18} />
+          <span>Change Password</span>
+        </Button>
       </header>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -894,6 +1198,62 @@ function ProfileView({ user, token }: { user: User; token: string }) {
           </table>
         </div>
       </Card>
+
+      {/* Change Password Modal */}
+      {showPasswordModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-[2rem] w-full max-w-md overflow-hidden shadow-2xl"
+          >
+            {passwordStatus === 'success' ? (
+              <div className="p-12 text-center space-y-4">
+                <div className="w-20 h-20 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-6">
+                  <CheckCircle2 size={40} />
+                </div>
+                <h3 className="text-2xl font-bold text-zinc-900">Password Updated!</h3>
+                <p className="text-zinc-500">Your password has been changed successfully.</p>
+              </div>
+            ) : (
+              <form onSubmit={handleChangePassword} className="p-8 space-y-6">
+                <div className="flex justify-between items-center mb-2">
+                  <h3 className="text-2xl font-bold">Change Password</h3>
+                  <button type="button" onClick={() => setShowPasswordModal(false)} className="p-2 hover:bg-zinc-100 rounded-full transition-colors">
+                    <X size={20} />
+                  </button>
+                </div>
+
+                {passwordStatus === 'error' && (
+                  <div className="bg-red-50 border border-red-100 p-4 rounded-xl flex items-start space-x-3">
+                    <AlertCircle size={20} className="text-red-600 mt-0.5" />
+                    <p className="text-xs text-red-800 leading-relaxed">{passwordError}</p>
+                  </div>
+                )}
+
+                <div className="space-y-4">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold uppercase tracking-widest text-zinc-400 ml-1">Current Password</label>
+                    <input name="currentPassword" type="password" required className="w-full px-4 py-3 bg-zinc-50 border border-zinc-100 rounded-xl focus:ring-2 focus:ring-black outline-none transition-all" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold uppercase tracking-widest text-zinc-400 ml-1">New Password</label>
+                    <input name="newPassword" type="password" required className="w-full px-4 py-3 bg-zinc-50 border border-zinc-100 rounded-xl focus:ring-2 focus:ring-black outline-none transition-all" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold uppercase tracking-widest text-zinc-400 ml-1">Confirm New Password</label>
+                    <input name="confirmPassword" type="password" required className="w-full px-4 py-3 bg-zinc-50 border border-zinc-100 rounded-xl focus:ring-2 focus:ring-black outline-none transition-all" />
+                  </div>
+                </div>
+
+                <Button type="submit" disabled={passwordStatus === 'loading'} className="w-full py-4 !rounded-xl text-lg shadow-xl shadow-black/10">
+                  {passwordStatus === 'loading' ? 'Updating...' : 'Update Password'}
+                </Button>
+              </form>
+            )}
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 }

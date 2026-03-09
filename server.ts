@@ -102,6 +102,19 @@ async function startServer() {
     res.json(users);
   });
 
+  app.post("/api/change-password", authenticateToken, (req: any, res: any) => {
+    const { currentPassword, newPassword } = req.body;
+    const user = db.prepare("SELECT * FROM users WHERE id = ?").get(req.user.id) as any;
+
+    if (!user || !bcrypt.compareSync(currentPassword, user.password)) {
+      return res.status(401).json({ error: "Incorrect current password" });
+    }
+
+    const hashedPassword = bcrypt.hashSync(newPassword, 10);
+    db.prepare("UPDATE users SET password = ? WHERE id = ?").run(hashedPassword, req.user.id);
+    res.json({ success: true });
+  });
+
   // Student Management
   app.get("/api/students", authenticateToken, (req, res) => {
     const students = db.prepare("SELECT * FROM students").all();
