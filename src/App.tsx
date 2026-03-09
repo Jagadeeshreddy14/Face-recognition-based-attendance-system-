@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import * as faceapi from 'face-api.js';
 import { loadModels, createFaceMatcher } from './services/faceRecognition';
-import { LogIn, UserCheck, Users, BarChart3, Settings, LogOut, Camera, ShieldCheck, FileSpreadsheet, FileText, User, Menu, X, Activity, CheckCircle2, AlertCircle } from 'lucide-react';
+import { LogIn, UserCheck, Users, BarChart3, Settings, LogOut, Camera, ShieldCheck, FileSpreadsheet, FileText, User, Menu, X, Activity, CheckCircle2, AlertCircle, Clock, UserPlus, Check, Ban } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
@@ -58,7 +58,7 @@ const Card = ({ children, className = "" }: any) => (
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(localStorage.getItem('token'));
-  const [view, setView] = useState<'login' | 'dashboard' | 'attendance' | 'students' | 'reports' | 'profile' | 'live'>('login');
+  const [view, setView] = useState<'login' | 'dashboard' | 'attendance' | 'students' | 'reports' | 'profile' | 'live' | 'register' | 'approvals' | 'settings'>('login');
   const [loading, setLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -109,7 +109,8 @@ export default function App() {
     setView('login');
   };
 
-  if (!user && view === 'login') return <LoginPage onLogin={handleLogin} loading={loading} />;
+  if (!user && view === 'login') return <LoginPage onLogin={handleLogin} onRegister={() => setView('register')} loading={loading} />;
+  if (!user && view === 'register') return <RegisterPage onBack={() => setView('login')} />;
 
   const Navigation = () => (
     <nav className="flex-1 space-y-1">
@@ -119,7 +120,9 @@ export default function App() {
       {user?.role === 'admin' && (
         <>
           <NavItem icon={<Users size={20} />} label="Students" active={view === 'students'} onClick={() => { setView('students'); setSidebarOpen(false); }} />
+          <NavItem icon={<UserPlus size={20} />} label="Approvals" active={view === 'approvals'} onClick={() => { setView('approvals'); setSidebarOpen(false); }} />
           <NavItem icon={<FileText size={20} />} label="Reports" active={view === 'reports'} onClick={() => { setView('reports'); setSidebarOpen(false); }} />
+          <NavItem icon={<Settings size={20} />} label="System Settings" active={view === 'settings'} onClick={() => { setView('settings'); setSidebarOpen(false); }} />
         </>
       )}
       {user?.role === 'student' && (
@@ -200,7 +203,9 @@ export default function App() {
             {view === 'live' && <LiveAttendanceView token={token!} />}
             {view === 'attendance' && <AttendanceView token={token!} />}
             {view === 'students' && <StudentsView token={token!} />}
+            {view === 'approvals' && <ApprovalsView token={token!} />}
             {view === 'reports' && <ReportsView token={token!} />}
+            {view === 'settings' && <SettingsView token={token!} />}
             {view === 'profile' && <ProfileView user={user!} token={token!} />}
           </motion.div>
         </AnimatePresence>
@@ -225,7 +230,7 @@ function NavItem({ icon, label, active, onClick }: any) {
   );
 }
 
-function LoginPage({ onLogin, loading }: any) {
+function LoginPage({ onLogin, onRegister, loading }: any) {
   return (
     <div className="min-h-screen bg-[#0A0A0A] flex items-center justify-center p-6">
       <div className="absolute inset-0 overflow-hidden opacity-20">
@@ -272,21 +277,136 @@ function LoginPage({ onLogin, loading }: any) {
             </Button>
           </form>
 
+          <div className="mt-6 text-center">
+            <button onClick={onRegister} className="text-sm text-zinc-400 hover:text-white transition-colors">
+              New student? <span className="text-white font-bold underline underline-offset-4">Register for Approval</span>
+            </button>
+          </div>
+
           <div className="mt-8 pt-8 border-t border-white/5 text-center">
             <p className="text-xs text-zinc-500">
               Default Admin: <span className="text-zinc-300 font-mono">admin / admin123</span>
             </p>
-            <button 
-              onClick={async () => {
-                const res = await fetch('/api/debug/users');
-                const users = await res.json();
-                alert("Users in DB: " + JSON.stringify(users));
-              }}
-              className="mt-4 text-[10px] text-zinc-600 hover:text-zinc-400"
-            >
-              Debug: Check Users
-            </button>
           </div>
+        </Card>
+      </motion.div>
+    </div>
+  );
+}
+
+function RegisterPage({ onBack }: { onBack: () => void }) {
+  const [isCapturing, setIsCapturing] = useState(false);
+  const [captureProgress, setCaptureProgress] = useState(0);
+  const [capturedDescriptor, setCapturedDescriptor] = useState<any>(null);
+  const [success, setSuccess] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  const startCamera = async () => {
+    try {
+      setIsCapturing(true);
+      setCaptureProgress(0);
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+      if (videoRef.current) videoRef.current.srcObject = stream;
+      await loadModels();
+    } catch (err) {
+      alert("Could not access camera");
+      setIsCapturing(false);
+    }
+  };
+
+  const captureFace = async () => {
+    if (!videoRef.current) return;
+    const totalFrames = 10;
+    const descriptors: any[] = [];
+    for (let i = 0; i < totalFrames; i++) {
+      setCaptureProgress(((i + 1) / totalFrames) * 100);
+      const detection = await faceapi.detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptor();
+      if (detection) descriptors.push(Array.from(detection.descriptor));
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    if (descriptors.length > 0) {
+      const averaged = descriptors[0].map((_: any, idx: number) => descriptors.reduce((acc, curr) => acc + curr[idx], 0) / descriptors.length);
+      setCapturedDescriptor(averaged);
+      const stream = videoRef.current.srcObject as MediaStream;
+      stream.getTracks().forEach(track => track.stop());
+      setIsCapturing(false);
+    } else {
+      alert("No face detected");
+      setCaptureProgress(0);
+    }
+  };
+
+  const handleRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!capturedDescriptor) return alert("Please capture face data");
+    const formData = new FormData(e.target as HTMLFormElement);
+    const data = { ...Object.fromEntries(formData), face_descriptor: capturedDescriptor };
+    const res = await fetch('/api/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    if (res.ok) {
+      setSuccess(true);
+      setTimeout(onBack, 3000);
+    } else {
+      const err = await res.json();
+      alert(err.error || "Registration failed");
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-[#0A0A0A] flex items-center justify-center p-6">
+      <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="w-full max-w-md relative z-10">
+        <Card className="!bg-white/5 !border-white/10 backdrop-blur-xl p-10">
+          {success ? (
+            <div className="text-center py-10 space-y-6">
+              <div className="w-20 h-20 bg-emerald-500/20 text-emerald-500 rounded-full flex items-center justify-center mx-auto">
+                <CheckCircle2 size={40} />
+              </div>
+              <h2 className="text-2xl font-bold text-white">Request Submitted</h2>
+              <p className="text-zinc-400">Your registration is pending admin approval. You will be able to login once approved.</p>
+              <Button onClick={onBack} variant="secondary" className="w-full !bg-white/10 !text-white border-none">Back to Login</Button>
+            </div>
+          ) : (
+            <>
+              <div className="text-center mb-8">
+                <h2 className="text-2xl font-bold text-white mb-2">Student Registration</h2>
+                <p className="text-zinc-400 text-sm">Fill in your details and capture your face profile</p>
+              </div>
+              <form onSubmit={handleRegister} className="space-y-5">
+                <input name="name" required placeholder="Full Name" className="w-full px-5 py-3 bg-white/5 border border-white/10 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-white/10" />
+                <input name="roll_number" required placeholder="Roll Number" className="w-full px-5 py-3 bg-white/5 border border-white/10 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-white/10" />
+                <input name="department" required placeholder="Department" className="w-full px-5 py-3 bg-white/5 border border-white/10 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-white/10" />
+                
+                <div className="space-y-3">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Face Profile</label>
+                  {isCapturing ? (
+                    <div className="relative aspect-video bg-black rounded-xl overflow-hidden border border-white/10">
+                      <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover scale-x-[-1]" />
+                      <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/40">
+                        {captureProgress > 0 && <span className="text-white font-bold text-lg">{Math.round(captureProgress)}%</span>}
+                        <Button onClick={captureFace} className="mt-4 !bg-white !text-black">Capture Now</Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="border border-dashed border-white/10 rounded-xl p-6 text-center">
+                      {capturedDescriptor ? (
+                        <div className="text-emerald-400 font-bold flex items-center justify-center space-x-2">
+                          <CheckCircle2 size={18} /> <span>Face Data Captured</span>
+                        </div>
+                      ) : (
+                        <button type="button" onClick={startCamera} className="text-zinc-400 hover:text-white transition-colors text-sm font-medium">Click to Open Camera</button>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <Button type="submit" disabled={!capturedDescriptor} className="w-full py-4 !bg-white !text-black font-bold rounded-xl mt-4">Submit Registration</Button>
+                <button type="button" onClick={onBack} className="w-full text-zinc-500 text-sm hover:text-zinc-300">Back to Login</button>
+              </form>
+            </>
+          )}
         </Card>
       </motion.div>
     </div>
@@ -299,15 +419,17 @@ function Dashboard({ user, token }: { user: User; token: string }) {
 
   useEffect(() => {
     const fetchStats = async () => {
-      if (user.role === 'admin') {
-        const res = await fetch('/api/analytics/summary', { headers: { 'Authorization': `Bearer ${token}` } });
-        setStats(await res.json());
-      } else {
+      const res = await fetch('/api/analytics/summary', { headers: { 'Authorization': `Bearer ${token}` } });
+      setStats(await res.json());
+    };
+    const fetchStudentAttendance = async () => {
+      if (user.role === 'student') {
         const res = await fetch(`/api/attendance/student/${user.student_id}`, { headers: { 'Authorization': `Bearer ${token}` } });
         setStudentAttendance(await res.json());
       }
     };
     fetchStats();
+    fetchStudentAttendance();
   }, [user, token]);
 
   if (user.role === 'admin') {
@@ -323,9 +445,10 @@ function Dashboard({ user, token }: { user: User; token: string }) {
           </div>
         </header>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
           <StatCard label="Total Students" value={stats?.totalStudents || 0} icon={<Users className="text-blue-600" />} />
           <StatCard label="Present Today" value={stats?.presentToday || 0} icon={<UserCheck className="text-emerald-600" />} />
+          <StatCard label="Total Classes" value={stats?.totalClasses || 0} icon={<Clock className="text-orange-600" />} />
           <StatCard label="Attendance Rate" value={stats?.totalStudents ? `${Math.round((stats.presentToday / stats.totalStudents) * 100)}%` : '0%'} icon={<BarChart3 className="text-purple-600" />} />
         </div>
 
@@ -355,9 +478,10 @@ function Dashboard({ user, token }: { user: User; token: string }) {
         <p className="text-zinc-500 mt-1 text-sm md:text-base">Track your daily presence and statistics.</p>
       </header>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <StatCard label="Total Present" value={studentAttendance.length} icon={<UserCheck className="text-emerald-600" />} />
-        <StatCard label="Attendance %" value={`${Math.min(100, Math.round((studentAttendance.length / 30) * 100))}%`} icon={<BarChart3 className="text-blue-600" />} />
+        <StatCard label="Total Classes" value={stats?.totalClasses || 0} icon={<Clock className="text-orange-600" />} />
+        <StatCard label="Attendance %" value={stats?.totalClasses > 0 ? `${Math.round((studentAttendance.length / stats.totalClasses) * 100)}%` : '0%'} icon={<BarChart3 className="text-blue-600" />} />
       </div>
 
       <Card>
@@ -721,7 +845,8 @@ function StudentsView({ token }: { token: string }) {
 
   const fetchStudents = async () => {
     const res = await fetch('/api/students', { headers: { 'Authorization': `Bearer ${token}` } });
-    setStudents(await res.json());
+    const data = await res.json();
+    setStudents(data.filter((s: any) => s.status === 'approved'));
   };
 
   useEffect(() => { fetchStudents(); }, [token]);
@@ -970,6 +1095,142 @@ function StudentsView({ token }: { token: string }) {
   );
 }
 
+function ApprovalsView({ token }: { token: string }) {
+  const [pending, setPending] = useState<any[]>([]);
+
+  const fetchPending = async () => {
+    const res = await fetch('/api/students', { headers: { 'Authorization': `Bearer ${token}` } });
+    const data = await res.json();
+    setPending(data.filter((s: any) => s.status === 'pending'));
+  };
+
+  useEffect(() => { fetchPending(); }, [token]);
+
+  const approve = async (id: number) => {
+    const res = await fetch(`/api/students/approve/${id}`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (res.ok) fetchPending();
+  };
+
+  return (
+    <div className="space-y-8">
+      <header>
+        <h2 className="text-3xl md:text-4xl font-bold tracking-tight">Pending Approvals</h2>
+        <p className="text-zinc-500 mt-1">Review and approve new student registration requests.</p>
+      </header>
+
+      <Card>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left">
+            <thead>
+              <tr className="border-b border-zinc-100">
+                <th className="pb-4 font-semibold text-zinc-400 uppercase text-[10px] tracking-widest">Name</th>
+                <th className="pb-4 font-semibold text-zinc-400 uppercase text-[10px] tracking-widest">Roll Number</th>
+                <th className="pb-4 font-semibold text-zinc-400 uppercase text-[10px] tracking-widest">Department</th>
+                <th className="pb-4 font-semibold text-zinc-400 uppercase text-[10px] tracking-widest text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-50">
+              {pending.map((student) => (
+                <tr key={student.id}>
+                  <td className="py-4 font-bold">{student.name}</td>
+                  <td className="py-4 font-mono text-sm">{student.roll_number}</td>
+                  <td className="py-4 text-zinc-500">{student.department}</td>
+                  <td className="py-4 text-right space-x-2">
+                    <Button onClick={() => approve(student.id)} variant="success" className="text-xs px-3 py-1.5">Approve</Button>
+                    <button className="text-red-500 text-xs font-bold uppercase hover:underline">Reject</button>
+                  </td>
+                </tr>
+              ))}
+              {pending.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="py-12 text-center text-zinc-400 italic">No pending requests.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+function SettingsView({ token }: { token: string }) {
+  const [totalClasses, setTotalClasses] = useState(30);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchSettings = async () => {
+      const res = await fetch('/api/settings', { headers: { 'Authorization': `Bearer ${token}` } });
+      const data = await res.json();
+      const tc = data.find((s: any) => s.key === 'total_classes');
+      if (tc) setTotalClasses(parseInt(tc.value));
+      setLoading(false);
+    };
+    fetchSettings();
+  }, [token]);
+
+  const save = async () => {
+    await fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({ total_classes: totalClasses })
+    });
+    alert("Settings saved!");
+  };
+
+  if (loading) return null;
+
+  return (
+    <div className="space-y-8">
+      <header>
+        <h2 className="text-3xl md:text-4xl font-bold tracking-tight">System Settings</h2>
+        <p className="text-zinc-500 mt-1">Configure academic parameters and system behavior.</p>
+      </header>
+
+      <div className="max-w-xl">
+        <Card className="space-y-6">
+          <div className="space-y-4">
+            <h3 className="text-lg font-bold flex items-center space-x-2">
+              <Clock size={20} className="text-zinc-400" />
+              <span>Academic Configuration</span>
+            </h3>
+            <div className="space-y-2">
+              <label className="text-xs font-bold uppercase tracking-widest text-zinc-400">Total Classes Conducted</label>
+              <div className="flex space-x-3">
+                <input 
+                  type="number" 
+                  value={totalClasses} 
+                  onChange={(e) => setTotalClasses(parseInt(e.target.value))}
+                  className="flex-1 px-4 py-3 bg-zinc-50 border border-zinc-200 rounded-xl focus:ring-2 focus:ring-black outline-none"
+                />
+                <Button onClick={save}>Update</Button>
+              </div>
+              <p className="text-[10px] text-zinc-400 italic">This value is used to calculate attendance percentages for all students.</p>
+            </div>
+          </div>
+
+          <div className="pt-6 border-t border-zinc-100 space-y-4">
+            <h3 className="text-lg font-bold flex items-center space-x-2">
+              <AlertCircle size={20} className="text-zinc-400" />
+              <span>Email Notifications</span>
+            </h3>
+            <div className="p-4 bg-zinc-50 rounded-xl space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium">Admin Alerts</span>
+                <span className="text-[10px] font-bold uppercase text-emerald-600 bg-emerald-50 px-2 py-1 rounded">Active</span>
+              </div>
+              <p className="text-xs text-zinc-500">System will notify admin about new registrations and record deletions via SMTP.</p>
+            </div>
+          </div>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
 function ReportsView({ token }: { token: string }) {
   const [report, setReport] = useState<any[]>([]);
 
@@ -1059,6 +1320,7 @@ function ReportsView({ token }: { token: string }) {
 function ProfileView({ user, token }: { user: User; token: string }) {
   const [student, setStudent] = useState<any>(null);
   const [attendance, setAttendance] = useState<any[]>([]);
+  const [totalClasses, setTotalClasses] = useState(30);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [passwordStatus, setPasswordStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [passwordError, setPasswordError] = useState('');
@@ -1070,6 +1332,10 @@ function ProfileView({ user, token }: { user: User; token: string }) {
       
       const attendanceRes = await fetch(`/api/attendance/student/${user.student_id}`, { headers: { 'Authorization': `Bearer ${token}` } });
       setAttendance(await attendanceRes.json());
+
+      const statsRes = await fetch('/api/analytics/summary', { headers: { 'Authorization': `Bearer ${token}` } });
+      const stats = await statsRes.json();
+      setTotalClasses(stats.totalClasses);
     };
     fetchData();
   }, [user, token]);
@@ -1151,6 +1417,16 @@ function ProfileView({ user, token }: { user: User; token: string }) {
                 {isFaceRegistered ? 'Registered' : 'Not Registered'}
               </span>
             </div>
+          </div>
+        </Card>
+
+        <Card className="flex flex-col items-center justify-center text-center space-y-4">
+          <div>
+            <p className="text-sm font-medium text-zinc-400">Attendance Score</p>
+            <p className="text-5xl font-bold tracking-tight">
+              {totalClasses > 0 ? Math.round((attendance.length / totalClasses) * 100) : 0}%
+            </p>
+            <p className="text-xs text-zinc-400 mt-2 font-medium">{attendance.length} / {totalClasses} Classes</p>
           </div>
         </Card>
 

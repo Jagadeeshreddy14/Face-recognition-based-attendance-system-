@@ -3,6 +3,7 @@ import { createServer as createViteServer } from "vite";
 import Database from "better-sqlite3";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
+import nodemailer from "nodemailer";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -11,6 +12,32 @@ const __dirname = path.dirname(__filename);
 
 const db = new Database("attendance.db");
 const JWT_SECRET = process.env.JWT_SECRET || "super-secret-key-123";
+
+// Email Transporter
+const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST || "smtp.example.com",
+  port: parseInt(process.env.SMTP_PORT || "587"),
+  secure: false,
+  auth: {
+    user: process.env.SMTP_USER || "user@example.com",
+    pass: process.env.SMTP_PASS || "password",
+  },
+});
+
+const sendAdminEmail = async (subject: string, text: string) => {
+  const adminEmail = process.env.ADMIN_EMAIL;
+  if (!adminEmail) return;
+  try {
+    await transporter.sendMail({
+      from: `"Attendance System" <${process.env.SMTP_USER}>`,
+      to: adminEmail,
+      subject,
+      text,
+    });
+  } catch (error) {
+    console.error("Email error:", error);
+  }
+};
 
 // Initialize Database
 db.exec(`
@@ -28,7 +55,8 @@ db.exec(`
     name TEXT,
     roll_number TEXT UNIQUE,
     department TEXT,
-    face_descriptor TEXT -- JSON string of face descriptors
+    face_descriptor TEXT,
+    status TEXT DEFAULT 'approved' -- 'pending', 'approved', 'rejected'
   );
 
   CREATE TABLE IF NOT EXISTS attendance (
@@ -39,7 +67,21 @@ db.exec(`
     status TEXT DEFAULT 'present',
     FOREIGN KEY(student_id) REFERENCES students(id)
   );
+
+  CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT
+  );
+
+  INSERT OR IGNORE INTO settings (key, value) VALUES ('total_classes', '30');
 `);
+
+// Migration: Add status column if not exists
+try {
+  db.exec("ALTER TABLE students ADD COLUMN status TEXT DEFAULT 'approved'");
+} catch (e) {
+  // Column already exists
+}
 
 // Seed Admin if not exists
 const adminExists = db.prepare("SELECT * FROM users WHERE username = 'admin'").get();
@@ -121,22 +163,61 @@ async function startServer() {
     res.json(students);
   });
 
+  app.post("/api/register", async (req, res) => {
+    const { name, roll_number, department, face_descriptor } = req.body;
+    try {
+      const result = db.prepare("INSERT INTO students (name, roll_number, department, face_descriptor, status) VALUES (?, ?, ?, ?, ?)")
+        .run(name, roll_number, department, JSON.stringify(face_descriptor), 'pending');
+      
+      await sendAdminEmail(
+        "New Student Registration Request",
+        `A new student ${name} (${roll_number}) has registered and is waiting for approval.`
+      );
+
+      res.json({ id: result.lastInsertRowid, message: "Registration successful. Waiting for admin approval." });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/students/approve/:id", authenticateToken, (req: any, res) => {
+    if (req.user.role !== 'admin') return res.sendStatus(403);
+    const { id } = req.params;
+    const student = db.prepare("SELECT * FROM students WHERE id = ?").get(id) as any;
+    if (!student) return res.status(404).json({ error: "Student not found" });
+
+    db.prepare("UPDATE students SET status = 'approved' WHERE id = ?").run(id);
+    
+    // Create user account
+    const hashedPassword = bcrypt.hashSync(student.roll_number, 10);
+    db.prepare("INSERT OR IGNORE INTO users (username, password, role, student_id) VALUES (?, ?, ?, ?)")
+      .run(student.roll_number, hashedPassword, "student", id);
+
+    res.json({ success: true });
+  });
+
   app.get("/api/students/:id", authenticateToken, (req, res) => {
     const student = db.prepare("SELECT * FROM students WHERE id = ?").get(req.params.id);
     if (!student) return res.status(404).json({ error: "Student not found" });
     res.json(student);
   });
 
-  app.post("/api/students", authenticateToken, (req, res) => {
+  app.post("/api/students", authenticateToken, async (req: any, res) => {
+    if (req.user.role !== 'admin') return res.sendStatus(403);
     const { name, roll_number, department, face_descriptor } = req.body;
     try {
-      const result = db.prepare("INSERT INTO students (name, roll_number, department, face_descriptor) VALUES (?, ?, ?, ?)")
-        .run(name, roll_number, department, JSON.stringify(face_descriptor));
+      const result = db.prepare("INSERT INTO students (name, roll_number, department, face_descriptor, status) VALUES (?, ?, ?, ?, ?)")
+        .run(name, roll_number, department, JSON.stringify(face_descriptor), 'approved');
       
       // Create a student user account automatically
       const hashedPassword = bcrypt.hashSync(roll_number, 10); // Default password is roll number
       db.prepare("INSERT INTO users (username, password, role, student_id) VALUES (?, ?, ?, ?)")
         .run(roll_number, hashedPassword, "student", result.lastInsertRowid);
+
+      await sendAdminEmail(
+        "New Student Added by Admin",
+        `Admin has added a new student: ${name} (${roll_number}).`
+      );
 
       res.json({ id: result.lastInsertRowid });
     } catch (error: any) {
@@ -144,7 +225,14 @@ async function startServer() {
     }
   });
 
-  app.delete("/api/students/:id", authenticateToken, (req, res) => {
+  app.delete("/api/students/:id", authenticateToken, async (req: any, res) => {
+    const student = db.prepare("SELECT * FROM students WHERE id = ?").get(req.params.id) as any;
+    if (student) {
+      await sendAdminEmail(
+        "Student Record Deleted",
+        `Admin has deleted the record for student: ${student.name} (${student.roll_number}). All associated attendance records have been removed.`
+      );
+    }
     db.prepare("DELETE FROM users WHERE student_id = ?").run(req.params.id);
     db.prepare("DELETE FROM attendance WHERE student_id = ?").run(req.params.id);
     db.prepare("DELETE FROM students WHERE id = ?").run(req.params.id);
@@ -184,10 +272,13 @@ async function startServer() {
   });
 
   app.get("/api/analytics/summary", authenticateToken, (req, res) => {
-    const totalStudents = db.prepare("SELECT COUNT(*) as count FROM students").get() as any;
+    const totalStudents = db.prepare("SELECT COUNT(*) as count FROM students WHERE status = 'approved'").get() as any;
     const today = new Date().toISOString().split('T')[0];
     const presentToday = db.prepare("SELECT COUNT(*) as count FROM attendance WHERE date = ?").get(today) as any;
     
+    const totalClassesSetting = db.prepare("SELECT value FROM settings WHERE key = 'total_classes'").get() as any;
+    const totalClasses = parseInt(totalClassesSetting?.value || "30");
+
     const dailyStats = db.prepare(`
       SELECT date, COUNT(*) as count 
       FROM attendance 
@@ -199,8 +290,21 @@ async function startServer() {
     res.json({
       totalStudents: totalStudents.count,
       presentToday: presentToday.count,
+      totalClasses,
       dailyStats: dailyStats.reverse()
     });
+  });
+
+  app.get("/api/settings", authenticateToken, (req, res) => {
+    const settings = db.prepare("SELECT * FROM settings").all();
+    res.json(settings);
+  });
+
+  app.post("/api/settings", authenticateToken, (req: any, res) => {
+    if (req.user.role !== 'admin') return res.sendStatus(403);
+    const { total_classes } = req.body;
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run('total_classes', total_classes.toString());
+    res.json({ success: true });
   });
 
   // Vite middleware
