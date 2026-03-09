@@ -196,6 +196,13 @@ async function startServer() {
     res.json({ success: true });
   });
 
+  app.post("/api/students/reject/:id", authenticateToken, (req: any, res) => {
+    if (req.user.role !== 'admin') return res.sendStatus(403);
+    const { id } = req.params;
+    db.prepare("UPDATE students SET status = 'rejected' WHERE id = ?").run(id);
+    res.json({ success: true });
+  });
+
   app.get("/api/students/:id", authenticateToken, (req, res) => {
     const student = db.prepare("SELECT * FROM students WHERE id = ?").get(req.params.id);
     if (!student) return res.status(404).json({ error: "Student not found" });

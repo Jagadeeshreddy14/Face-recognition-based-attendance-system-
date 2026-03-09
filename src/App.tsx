@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import * as faceapi from 'face-api.js';
 import { loadModels, createFaceMatcher } from './services/faceRecognition';
-import { LogIn, UserCheck, Users, BarChart3, Settings, LogOut, Camera, ShieldCheck, FileSpreadsheet, FileText, User, Menu, X, Activity, CheckCircle2, AlertCircle, Clock, UserPlus, Check, Ban, Search, ArrowLeft, Upload, FileUp } from 'lucide-react';
+import { LogIn, UserCheck, Users, BarChart3, Settings, LogOut, Camera, ShieldCheck, FileSpreadsheet, FileText, User, Menu, X, Activity, CheckCircle2, AlertCircle, Clock, UserPlus, Check, Ban, Search, ArrowLeft, Upload, FileUp, XCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
@@ -62,6 +62,20 @@ export default function App() {
   const [selectedStudentId, setSelectedStudentId] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [pendingCount, setPendingCount] = useState(0);
+
+  const fetchPendingCount = async () => {
+    if (user?.role === 'admin' && token) {
+      try {
+        const res = await fetch('/api/students', { headers: { 'Authorization': `Bearer ${token}` } });
+        const data = await res.json();
+        const pending = data.filter((s: any) => s.status === 'pending');
+        setPendingCount(pending.length);
+      } catch (err) {
+        console.error("Failed to fetch pending count", err);
+      }
+    }
+  };
 
   useEffect(() => {
     if (token) {
@@ -72,6 +86,16 @@ export default function App() {
       }
     }
   }, [token]);
+
+  useEffect(() => {
+    fetchPendingCount();
+    // Refresh count every 30 seconds if admin
+    let interval: any;
+    if (user?.role === 'admin') {
+      interval = setInterval(fetchPendingCount, 30000);
+    }
+    return () => clearInterval(interval);
+  }, [user, token]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -121,7 +145,13 @@ export default function App() {
       {user?.role === 'admin' && (
         <>
           <NavItem icon={<Users size={20} />} label="Students" active={view === 'students'} onClick={() => { setView('students'); setSidebarOpen(false); }} />
-          <NavItem icon={<UserPlus size={20} />} label="Approvals" active={view === 'approvals'} onClick={() => { setView('approvals'); setSidebarOpen(false); }} />
+          <NavItem 
+            icon={<UserPlus size={20} />} 
+            label="Approvals" 
+            active={view === 'approvals'} 
+            onClick={() => { setView('approvals'); setSidebarOpen(false); }} 
+            badge={pendingCount > 0 ? pendingCount : undefined}
+          />
           <NavItem icon={<FileText size={20} />} label="Reports" active={view === 'reports'} onClick={() => { setView('reports'); setSidebarOpen(false); }} />
           <NavItem icon={<Settings size={20} />} label="System Settings" active={view === 'settings'} onClick={() => { setView('settings'); setSidebarOpen(false); }} />
         </>
@@ -204,7 +234,7 @@ export default function App() {
             {view === 'live' && <LiveAttendanceView token={token!} />}
             {view === 'attendance' && <AttendanceView token={token!} />}
             {view === 'students' && <StudentsView token={token!} onViewDetails={(id) => { setSelectedStudentId(id); setView('student-details'); }} />}
-            {view === 'approvals' && <ApprovalsView token={token!} />}
+            {view === 'approvals' && <ApprovalsView token={token!} onUpdate={fetchPendingCount} />}
             {view === 'reports' && <ReportsView token={token!} />}
             {view === 'settings' && <SettingsView token={token!} />}
             {view === 'profile' && <ProfileView user={user!} token={token!} />}
@@ -218,16 +248,23 @@ export default function App() {
 
 // --- Sub-Views ---
 
-function NavItem({ icon, label, active, onClick }: any) {
+function NavItem({ icon, label, active, onClick, badge }: any) {
   return (
     <button
       onClick={onClick}
-      className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all font-medium ${
+      className={`w-full flex items-center justify-between px-4 py-3 rounded-xl transition-all font-medium ${
         active ? 'bg-black text-white shadow-lg shadow-black/10' : 'text-zinc-500 hover:bg-zinc-100'
       }`}
     >
-      {icon}
-      <span>{label}</span>
+      <div className="flex items-center space-x-3">
+        {icon}
+        <span>{label}</span>
+      </div>
+      {badge !== undefined && (
+        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${active ? 'bg-white text-black' : 'bg-red-500 text-white'}`}>
+          {badge}
+        </span>
+      )}
     </button>
   );
 }
@@ -1241,19 +1278,29 @@ function StudentsView({ token, onViewDetails }: { token: string, onViewDetails: 
   );
 }
 
-function ApprovalsView({ token }: { token: string }) {
+function ApprovalsView({ token, onUpdate }: { token: string, onUpdate: () => void }) {
   const [pending, setPending] = useState<any[]>([]);
 
   const fetchPending = async () => {
     const res = await fetch('/api/students', { headers: { 'Authorization': `Bearer ${token}` } });
     const data = await res.json();
     setPending(data.filter((s: any) => s.status === 'pending'));
+    onUpdate();
   };
 
   useEffect(() => { fetchPending(); }, [token]);
 
   const approve = async (id: number) => {
     const res = await fetch(`/api/students/approve/${id}`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (res.ok) fetchPending();
+  };
+
+  const reject = async (id: number) => {
+    if (!confirm("Are you sure you want to reject this registration?")) return;
+    const res = await fetch(`/api/students/reject/${id}`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${token}` }
     });
@@ -1280,13 +1327,27 @@ function ApprovalsView({ token }: { token: string }) {
             </thead>
             <tbody className="divide-y divide-zinc-50">
               {pending.map((student) => (
-                <tr key={student.id}>
+                <tr key={student.id} className="group hover:bg-zinc-50/50 transition-colors">
                   <td className="py-4 font-bold">{student.name}</td>
                   <td className="py-4 font-mono text-sm">{student.roll_number}</td>
                   <td className="py-4 text-zinc-500">{student.department}</td>
-                  <td className="py-4 text-right space-x-2">
-                    <Button onClick={() => approve(student.id)} variant="success" className="text-xs px-3 py-1.5">Approve</Button>
-                    <button className="text-red-500 text-xs font-bold uppercase hover:underline">Reject</button>
+                  <td className="py-4 text-right">
+                    <div className="flex items-center justify-end space-x-3">
+                      <Button 
+                        onClick={() => approve(student.id)} 
+                        className="!bg-emerald-600 hover:!bg-emerald-700 !text-white text-xs px-4 py-2 !rounded-lg flex items-center space-x-2"
+                      >
+                        <CheckCircle2 size={14} />
+                        <span>Approve</span>
+                      </Button>
+                      <button 
+                        onClick={() => reject(student.id)}
+                        className="text-red-500 hover:text-red-700 text-xs font-bold uppercase p-2 hover:bg-red-50 rounded-lg transition-all flex items-center space-x-1"
+                      >
+                        <XCircle size={14} />
+                        <span>Reject</span>
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
